@@ -186,15 +186,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/messages/:messageId/rate', isAuthenticated, async (req: any, res) => {
     try {
       const { messageId } = req.params;
-      const userId = req.user.claims.sub;
+      const judgeId = req.user.claims.sub;
       const { rating, explanation } = req.body;
 
-      // Verify user is the judge for this match
-      const message = await storage.createMessage({ matchId: '', userId: '', content: '' }); // This is a dummy call just to get message structure
-      // TODO: Add proper verification that user is judge of this match
+      // Use the game engine to process the judge rating
+      const result = await GameEngine.processJudgeRating(messageId, judgeId, rating, explanation);
       
-      await storage.updateMessageRating(messageId, rating, explanation || '');
-      res.json({ success: true });
+      if (result.success) {
+        res.json({ 
+          success: true, 
+          eloUpdated: result.eloUpdated,
+          message: result.eloUpdated ? "Rating submitted. Judge ELOs updated based on agreement." : "Rating submitted. Waiting for other judge."
+        });
+      } else {
+        res.status(400).json({ message: "Failed to process judge rating" });
+      }
     } catch (error) {
       console.error("Error rating message:", error);
       res.status(500).json({ message: "Failed to rate message" });

@@ -36,9 +36,14 @@ export const users = pgTable("users", {
   profileImageUrl: varchar("profile_image_url"),
   elo: integer("elo").default(1200).notNull(),
   peakElo: integer("peak_elo").default(1200).notNull(),
+  judgeElo: integer("judge_elo").default(1200).notNull(),
+  peakJudgeElo: integer("peak_judge_elo").default(1200).notNull(),
   totalMatches: integer("total_matches").default(0).notNull(),
+  totalJudgeMatches: integer("total_judge_matches").default(0).notNull(),
   wins: integer("wins").default(0).notNull(),
   losses: integer("losses").default(0).notNull(),
+  judgeAgreements: integer("judge_agreements").default(0).notNull(),
+  judgeDisagreements: integer("judge_disagreements").default(0).notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -51,7 +56,8 @@ export const matches = pgTable("matches", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   player1Id: varchar("player1_id").references(() => users.id).notNull(),
   player2Id: varchar("player2_id").references(() => users.id),
-  judgeId: varchar("judge_id").references(() => users.id),
+  judge1Id: varchar("judge1_id").references(() => users.id),
+  judge2Id: varchar("judge2_id").references(() => users.id),
   status: matchStatusEnum("status").default('waiting').notNull(),
   currentTurn: varchar("current_turn").references(() => users.id),
   winnerId: varchar("winner_id").references(() => users.id),
@@ -68,9 +74,16 @@ export const messages = pgTable("messages", {
   matchId: varchar("match_id").references(() => matches.id).notNull(),
   userId: varchar("user_id").references(() => users.id).notNull(),
   content: text("content").notNull(),
-  rating: moveRatingEnum("rating"),
-  ratingExplanation: text("rating_explanation"),
   sentAt: timestamp("sent_at").defaultNow(),
+});
+
+export const judgeRatings = pgTable("judge_ratings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  messageId: varchar("message_id").references(() => messages.id).notNull(),
+  judgeId: varchar("judge_id").references(() => users.id).notNull(),
+  rating: moveRatingEnum("rating").notNull(),
+  explanation: text("explanation"),
+  ratedAt: timestamp("rated_at").defaultNow(),
 });
 
 export const queue = pgTable("queue", {
@@ -100,10 +113,15 @@ export const matchesRelations = relations(matches, ({ one, many }) => ({
     references: [users.id],
     relationName: "player2",
   }),
-  judge: one(users, {
-    fields: [matches.judgeId],
+  judge1: one(users, {
+    fields: [matches.judge1Id],
     references: [users.id],
-    relationName: "judge",
+    relationName: "judge1",
+  }),
+  judge2: one(users, {
+    fields: [matches.judge2Id],
+    references: [users.id],
+    relationName: "judge2",
   }),
   winner: one(users, {
     fields: [matches.winnerId],
@@ -118,13 +136,25 @@ export const matchesRelations = relations(matches, ({ one, many }) => ({
   messages: many(messages),
 }));
 
-export const messagesRelations = relations(messages, ({ one }) => ({
+export const messagesRelations = relations(messages, ({ one, many }) => ({
   match: one(matches, {
     fields: [messages.matchId],
     references: [matches.id],
   }),
   user: one(users, {
     fields: [messages.userId],
+    references: [users.id],
+  }),
+  judgeRatings: many(judgeRatings),
+}));
+
+export const judgeRatingsRelations = relations(judgeRatings, ({ one }) => ({
+  message: one(messages, {
+    fields: [judgeRatings.messageId],
+    references: [messages.id],
+  }),
+  judge: one(users, {
+    fields: [judgeRatings.judgeId],
     references: [users.id],
   }),
 }));
@@ -151,8 +181,11 @@ export const insertMatchSchema = createInsertSchema(matches).omit({
 export const insertMessageSchema = createInsertSchema(messages).omit({
   id: true,
   sentAt: true,
-  rating: true,
-  ratingExplanation: true,
+});
+
+export const insertJudgeRatingSchema = createInsertSchema(judgeRatings).omit({
+  id: true,
+  ratedAt: true,
 });
 
 export const insertQueueSchema = createInsertSchema(queue).omit({
@@ -165,9 +198,11 @@ export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
 export type Match = typeof matches.$inferSelect;
 export type Message = typeof messages.$inferSelect;
+export type JudgeRating = typeof judgeRatings.$inferSelect;
 export type Queue = typeof queue.$inferSelect;
 export type InsertMatch = z.infer<typeof insertMatchSchema>;
 export type InsertMessage = z.infer<typeof insertMessageSchema>;
+export type InsertJudgeRating = z.infer<typeof insertJudgeRatingSchema>;
 export type InsertQueue = z.infer<typeof insertQueueSchema>;
 export type MatchStatus = typeof matchStatusEnum.enumValues[number];
 export type MoveRating = typeof moveRatingEnum.enumValues[number];

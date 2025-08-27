@@ -3,13 +3,16 @@ import {
   matches,
   messages,
   queue,
+  judgeRatings,
   type User,
   type UpsertUser,
   type Match,
   type Message,
+  type JudgeRating,
   type Queue,
   type InsertMatch,
   type InsertMessage,
+  type InsertJudgeRating,
   type InsertQueue,
   type MatchStatus,
   type MoveRating,
@@ -25,20 +28,21 @@ export interface IStorage {
   updateUserElo(userId: string, newElo: number): Promise<void>;
   updateUserStats(userId: string, won: boolean): Promise<void>;
   getTopPlayers(limit: number): Promise<User[]>;
+  getTopJudges(limit: number): Promise<User[]>;
   
   // Queue operations
   joinQueue(userId: string, elo: number, matchType?: 'player' | 'judge'): Promise<Queue>;
   leaveQueue(userId: string): Promise<void>;
   findMatchInQueue(elo: number, eloRange: number): Promise<Queue | undefined>;
-  findJudgeInQueue(): Promise<Queue | undefined>;
+  findJudgeInQueue(excludeUserId?: string): Promise<Queue | undefined>;
   getUserInQueue(userId: string): Promise<Queue | undefined>;
   
   // Match operations
-  createMatch(player1Id: string, player2Id?: string, judgeId?: string): Promise<Match>;
+  createMatch(player1Id: string, player2Id?: string, judge1Id?: string, judge2Id?: string): Promise<Match>;
   getMatch(matchId: string): Promise<Match | undefined>;
   getMatchWithPlayers(matchId: string): Promise<any>;
   updateMatchStatus(matchId: string, status: MatchStatus): Promise<void>;
-  startMatch(matchId: string, player2Id: string, judgeId?: string): Promise<void>;
+  startMatch(matchId: string, player2Id: string, judge1Id?: string, judge2Id?: string): Promise<void>;
   setMatchWinner(matchId: string, winnerId: string, player1Score: number, player2Score: number): Promise<void>;
   switchTurn(matchId: string, nextUserId: string): Promise<void>;
   getUserActiveMatch(userId: string): Promise<Match | undefined>;
@@ -48,6 +52,12 @@ export interface IStorage {
   createMessage(message: InsertMessage): Promise<Message>;
   updateMessageRating(messageId: string, rating: MoveRating, explanation: string): Promise<void>;
   getMatchMessages(matchId: string): Promise<any[]>;
+  
+  // Judge rating operations
+  createJudgeRating(judgeRating: InsertJudgeRating): Promise<JudgeRating>;
+  getMessageJudgeRatings(messageId: string): Promise<JudgeRating[]>;
+  updateJudgeElo(userId: string, newJudgeElo: number): Promise<void>;
+  updateJudgeStats(userId: string, agreed: boolean): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -103,6 +113,14 @@ export class DatabaseStorage implements IStorage {
       .limit(limit);
   }
 
+  async getTopJudges(limit: number): Promise<User[]> {
+    return await db
+      .select()
+      .from(users)
+      .orderBy(desc(users.judgeElo))
+      .limit(limit);
+  }
+
   // Queue operations
   async joinQueue(userId: string, elo: number, matchType: 'player' | 'judge' = 'player'): Promise<Queue> {
     const [queueEntry] = await db
@@ -136,11 +154,16 @@ export class DatabaseStorage implements IStorage {
     return match;
   }
 
-  async findJudgeInQueue(): Promise<Queue | undefined> {
+  async findJudgeInQueue(excludeUserId?: string): Promise<Queue | undefined> {
+    const whereConditions = [eq(queue.matchType, 'judge')];
+    if (excludeUserId) {
+      whereConditions.push(sql`user_id != ${excludeUserId}`);
+    }
+    
     const [judge] = await db
       .select()
       .from(queue)
-      .where(eq(queue.matchType, 'judge'))
+      .where(and(...whereConditions))
       .orderBy(asc(queue.joinedAt))
       .limit(1);
     return judge;
@@ -155,16 +178,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Match operations
-  async createMatch(player1Id: string, player2Id?: string, judgeId?: string): Promise<Match> {
+  async createMatch(player1Id: string, player2Id?: string, judge1Id?: string, judge2Id?: string): Promise<Match> {
     const [match] = await db
       .insert(matches)
       .values({
         player1Id,
         player2Id,
-        judgeId,
-        status: (player2Id && judgeId) ? 'active' : 'waiting',
+        judge1Id,
+        judge2Id,
+        status: (player2Id && judge1Id && judge2Id) ? 'active' : 'waiting',
         currentTurn: player1Id,
-        startedAt: (player2Id && judgeId) ? new Date() : undefined,
+        startedAt: (player2Id && judge1Id && judge2Id) ? new Date() : undefined,
       })
       .returning();
     return match;
@@ -206,19 +230,28 @@ export class DatabaseStorage implements IStorage {
           profileImageUrl: sql`p2.profile_image_url`,
           elo: sql`p2.elo`,
         },
-        judge: {
-          id: sql`j.id`,
-          email: sql`j.email`,
-          firstName: sql`j.first_name`,
-          lastName: sql`j.last_name`,
-          profileImageUrl: sql`j.profile_image_url`,
-          elo: sql`j.elo`,
+        judge1: {
+          id: sql`j1.id`,
+          email: sql`j1.email`,
+          firstName: sql`j1.first_name`,
+          lastName: sql`j1.last_name`,
+          profileImageUrl: sql`j1.profile_image_url`,
+          judgeElo: sql`j1.judge_elo`,
+        },
+        judge2: {
+          id: sql`j2.id`,
+          email: sql`j2.email`,
+          firstName: sql`j2.first_name`,
+          lastName: sql`j2.last_name`,
+          profileImageUrl: sql`j2.profile_image_url`,
+          judgeElo: sql`j2.judge_elo`,
         },
       })
       .from(matches)
       .leftJoin(users, eq(matches.player1Id, users.id))
       .leftJoin(sql`users p2`, sql`matches.player2_id = p2.id`)
-      .leftJoin(sql`users j`, sql`matches.judge_id = j.id`)
+      .leftJoin(sql`users j1`, sql`matches.judge1_id = j1.id`)
+      .leftJoin(sql`users j2`, sql`matches.judge2_id = j2.id`)
       .where(eq(matches.id, matchId));
     return match;
   }
@@ -233,12 +266,13 @@ export class DatabaseStorage implements IStorage {
       .where(eq(matches.id, matchId));
   }
 
-  async startMatch(matchId: string, player2Id: string, judgeId?: string): Promise<void> {
+  async startMatch(matchId: string, player2Id: string, judge1Id?: string, judge2Id?: string): Promise<void> {
     await db
       .update(matches)
       .set({
         player2Id,
-        judgeId,
+        judge1Id,
+        judge2Id,
         status: 'active',
         startedAt: new Date(),
       })
@@ -271,7 +305,12 @@ export class DatabaseStorage implements IStorage {
       .from(matches)
       .where(
         and(
-          or(eq(matches.player1Id, userId), eq(matches.player2Id, userId)),
+          or(
+            eq(matches.player1Id, userId), 
+            eq(matches.player2Id, userId),
+            eq(matches.judge1Id, userId),
+            eq(matches.judge2Id, userId)
+          ),
           eq(matches.status, 'active')
         )
       );
@@ -319,10 +358,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateMessageRating(messageId: string, rating: MoveRating, explanation: string): Promise<void> {
-    await db
-      .update(messages)
-      .set({ rating, ratingExplanation: explanation })
-      .where(eq(messages.id, messageId));
+    // This method is deprecated - use createJudgeRating instead
+    console.warn('updateMessageRating is deprecated - use createJudgeRating instead');
   }
 
   async getMatchMessages(matchId: string): Promise<any[]> {
@@ -330,8 +367,6 @@ export class DatabaseStorage implements IStorage {
       .select({
         id: messages.id,
         content: messages.content,
-        rating: messages.rating,
-        ratingExplanation: messages.ratingExplanation,
         sentAt: messages.sentAt,
         user: {
           id: users.id,
@@ -344,6 +379,46 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(users, eq(messages.userId, users.id))
       .where(eq(messages.matchId, matchId))
       .orderBy(asc(messages.sentAt));
+  }
+
+  // Judge rating operations
+  async createJudgeRating(judgeRating: InsertJudgeRating): Promise<JudgeRating> {
+    const [newJudgeRating] = await db
+      .insert(judgeRatings)
+      .values(judgeRating)
+      .returning();
+    return newJudgeRating;
+  }
+
+  async getMessageJudgeRatings(messageId: string): Promise<JudgeRating[]> {
+    return await db
+      .select()
+      .from(judgeRatings)
+      .where(eq(judgeRatings.messageId, messageId))
+      .orderBy(asc(judgeRatings.ratedAt));
+  }
+
+  async updateJudgeElo(userId: string, newJudgeElo: number): Promise<void> {
+    await db
+      .update(users)
+      .set({ 
+        judgeElo: newJudgeElo,
+        peakJudgeElo: sql`GREATEST(peak_judge_elo, ${newJudgeElo})`,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
+  }
+
+  async updateJudgeStats(userId: string, agreed: boolean): Promise<void> {
+    await db
+      .update(users)
+      .set({
+        totalJudgeMatches: sql`total_judge_matches + 1`,
+        judgeAgreements: agreed ? sql`judge_agreements + 1` : sql`judge_agreements`,
+        judgeDisagreements: agreed ? sql`judge_disagreements` : sql`judge_disagreements + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
   }
 }
 

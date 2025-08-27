@@ -314,29 +314,64 @@ export default function Home() {
                   Your Stats
                 </h3>
                 <div className="space-y-4">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Current ELO</span>
-                    <span className="font-bold text-primary" data-testid="text-current-elo">
-                      {user.elo}
-                    </span>
+                  <div className="border-b border-border pb-3 mb-3">
+                    <h4 className="text-sm font-semibold text-muted-foreground mb-2">Player Stats</h4>
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Player ELO</span>
+                        <span className="font-bold text-primary" data-testid="text-current-elo">
+                          {user.elo}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Peak Player ELO</span>
+                        <span className="font-semibold" data-testid="text-peak-elo">
+                          {user.peakElo}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Win Rate</span>
+                        <span className="font-semibold text-green-500" data-testid="text-win-rate">
+                          {calculateWinRate(user.wins, user.totalMatches)}%
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Player Matches</span>
+                        <span className="font-semibold" data-testid="text-total-matches">
+                          {user.totalMatches}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Peak ELO</span>
-                    <span className="font-semibold" data-testid="text-peak-elo">
-                      {user.peakElo}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Win Rate</span>
-                    <span className="font-semibold text-green-500" data-testid="text-win-rate">
-                      {calculateWinRate(user.wins, user.totalMatches)}%
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Total Matches</span>
-                    <span className="font-semibold" data-testid="text-total-matches">
-                      {user.totalMatches}
-                    </span>
+                  
+                  <div>
+                    <h4 className="text-sm font-semibold text-muted-foreground mb-2">Judge Stats</h4>
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Judge ELO</span>
+                        <span className="font-bold text-amber-500" data-testid="text-judge-elo">
+                          {user.judgeElo || 1200}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Peak Judge ELO</span>
+                        <span className="font-semibold" data-testid="text-peak-judge-elo">
+                          {user.peakJudgeElo || 1200}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Agreement Rate</span>
+                        <span className="font-semibold text-blue-500" data-testid="text-agreement-rate">
+                          {calculateWinRate(user.judgeAgreements || 0, user.totalJudgeMatches || 0)}%
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Judge Matches</span>
+                        <span className="font-semibold" data-testid="text-judge-matches">
+                          {user.totalJudgeMatches || 0}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </CardContent>

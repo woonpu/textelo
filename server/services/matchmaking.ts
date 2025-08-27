@@ -71,21 +71,26 @@ export class MatchmakingService {
         return { success: false };
       }
 
-      // Find judge in queue
-      const judge = await storage.findJudgeInQueue();
-      
-      if (!judge) {
+      // Find two judges in queue
+      const judge1 = await storage.findJudgeInQueue();
+      if (!judge1) {
         return { success: false };
       }
 
-      // Create match
-      const match = await storage.createMatch(userId, opponent.userId, judge.userId);
-      await storage.startMatch(match.id, opponent.userId, judge.userId);
+      const judge2 = await storage.findJudgeInQueue(judge1.userId); // Exclude first judge
+      if (!judge2) {
+        return { success: false };
+      }
+
+      // Create match with two judges
+      const match = await storage.createMatch(userId, opponent.userId, judge1.userId, judge2.userId);
+      await storage.startMatch(match.id, opponent.userId, judge1.userId, judge2.userId);
 
       // Remove all participants from queue
       await storage.leaveQueue(userId);
       await storage.leaveQueue(opponent.userId);
-      await storage.leaveQueue(judge.userId);
+      await storage.leaveQueue(judge1.userId);
+      await storage.leaveQueue(judge2.userId);
 
       return {
         success: true,

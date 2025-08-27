@@ -146,4 +146,73 @@ export class GameEngine {
     // This would be called by a background job to check for expired matches
     // For now, matches are checked when actions are performed
   }
+
+  static async processJudgeRating(messageId: string, judgeId: string, rating: string, explanation?: string): Promise<{
+    success: boolean;
+    eloUpdated?: boolean;
+  }> {
+    try {
+      // Create the judge rating
+      await storage.createJudgeRating({
+        messageId,
+        judgeId,
+        rating: rating as any,
+        explanation: explanation || '',
+      });
+
+      // Check if both judges have now rated this message
+      const allRatings = await storage.getMessageJudgeRatings(messageId);
+      
+      if (allRatings.length === 2) {
+        // Both judges have rated - check if they agree
+        const [rating1, rating2] = allRatings;
+        const agreed = rating1.rating === rating2.rating;
+
+        // Update judge ELOs based on agreement
+        await this.updateJudgeElos(rating1.judgeId, rating2.judgeId, agreed);
+        
+        return { success: true, eloUpdated: true };
+      }
+
+      return { success: true, eloUpdated: false };
+    } catch (error) {
+      console.error("Error processing judge rating:", error);
+      return { success: false };
+    }
+  }
+
+  private static async updateJudgeElos(judge1Id: string, judge2Id: string, agreed: boolean): Promise<void> {
+    try {
+      const judge1 = await storage.getUser(judge1Id);
+      const judge2 = await storage.getUser(judge2Id);
+      
+      if (!judge1 || !judge2) return;
+
+      const JUDGE_ELO_K_FACTOR = 16; // Smaller K-factor for judges
+      const AGREEMENT_BONUS = 10;  // Points gained for agreement
+      const DISAGREEMENT_PENALTY = 5; // Points lost for disagreement
+
+      if (agreed) {
+        // Both judges agree - they both gain ELO
+        const newElo1 = Math.max(800, judge1.judgeElo + AGREEMENT_BONUS);
+        const newElo2 = Math.max(800, judge2.judgeElo + AGREEMENT_BONUS);
+
+        await storage.updateJudgeElo(judge1Id, newElo1);
+        await storage.updateJudgeElo(judge2Id, newElo2);
+        await storage.updateJudgeStats(judge1Id, true);
+        await storage.updateJudgeStats(judge2Id, true);
+      } else {
+        // Judges disagree - they both lose ELO
+        const newElo1 = Math.max(800, judge1.judgeElo - DISAGREEMENT_PENALTY);
+        const newElo2 = Math.max(800, judge2.judgeElo - DISAGREEMENT_PENALTY);
+
+        await storage.updateJudgeElo(judge1Id, newElo1);
+        await storage.updateJudgeElo(judge2Id, newElo2);
+        await storage.updateJudgeStats(judge1Id, false);
+        await storage.updateJudgeStats(judge2Id, false);
+      }
+    } catch (error) {
+      console.error("Error updating judge ELOs:", error);
+    }
+  }
 }
